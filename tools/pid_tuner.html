@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dual Motor PID Tuner</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f4;
+      --panel: #ffffff;
+      --text: #1d2522;
+      --muted: #68736d;
+      --border: #d8ded7;
+      --accent: #0f8b6f;
+      --accent-strong: #08755c;
+      --warn: #b64f1f;
+      --danger: #b92323;
+      --ok: #23764b;
+      --field: #fbfcfb;
+      --shadow: 0 12px 28px rgba(30, 42, 37, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 6px;
+      min-height: 36px;
+      padding: 0 12px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: #aeb9b0;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    input,
+    select {
+      width: 100%;
+      min-height: 34px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--field);
+      color: var(--text);
+      padding: 6px 8px;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      background: rgba(246, 247, 244, 0.94);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(10px);
+    }
+
+    .bar {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 14px 20px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+    }
+
+    .primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .primary:hover {
+      background: var(--accent-strong);
+      border-color: var(--accent-strong);
+    }
+
+    .danger {
+      background: var(--danger);
+      border-color: var(--danger);
+      color: #fff;
+    }
+
+    .danger:hover {
+      background: #9f1f1f;
+      border-color: #9f1f1f;
+    }
+
+    main {
+      max-width: 1280px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 18px 20px 24px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .status {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      box-shadow: var(--shadow);
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+
+    .value {
+      font-size: 20px;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .value.ok {
+      color: var(--ok);
+    }
+
+    .value.warn {
+      color: var(--warn);
+    }
+
+    .motors {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .motor {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 14px;
+    }
+
+    .motor-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .mode {
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      overflow: hidden;
+      background: #eef3ef;
+    }
+
+    .mode button {
+      border: 0;
+      border-radius: 0;
+      min-height: 34px;
+      background: transparent;
+    }
+
+    .mode button.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .control-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      align-items: end;
+    }
+
+    .pid-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .section-title {
+      margin: 2px 0 -4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .enable-on {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    .enable-off {
+      color: var(--danger);
+      font-weight: 700;
+    }
+
+    .log {
+      background: #1e2420;
+      color: #dce6dd;
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 170px;
+      max-height: 240px;
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .unsupported {
+      display: none;
+      padding: 10px 12px;
+      background: #fff3e8;
+      color: #833815;
+      border: 1px solid #f0c5a3;
+      border-radius: 8px;
+    }
+
+    body.no-serial .unsupported {
+      display: block;
+    }
+
+    @media (max-width: 980px) {
+      .bar,
+      .motors,
+      .status {
+        grid-template-columns: 1fr;
+      }
+
+      .toolbar {
+        justify-content: flex-start;
+      }
+    }
+
+    @media (max-width: 640px) {
+      main,
+      .bar {
+        padding-left: 12px;
+        padding-right: 12px;
+      }
+
+      .grid,
+      .control-grid,
+      .pid-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="bar">
+        <h1>Dual Motor PID Tuner</h1>
+        <div class="toolbar">
+          <select id="baud" aria-label="Baud rate">
+            <option value="230400" selected>230400 baud</option>
+            <option value="115200">115200 baud</option>
+          </select>
+          <button id="connect" class="primary">连接串口</button>
+          <button id="disconnect" disabled>断开</button>
+          <button id="estop" class="danger" disabled>急停</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div class="unsupported">当前浏览器不支持 Web Serial，请使用 Chrome 或 Edge。</div>
+
+      <section class="status">
+        <div class="metric">
+          <div class="label">串口状态</div>
+          <div id="serialStatus" class="value warn">未连接</div>
+        </div>
+        <div class="metric">
+          <div class="label">母线电压</div>
+          <div id="vin" class="value">-- V</div>
+        </div>
+        <div class="metric">
+          <div class="label">欠压保护</div>
+          <div id="uv" class="value ok">正常</div>
+        </div>
+        <div class="metric">
+          <div class="label">急停状态</div>
+          <div id="estopStatus" class="value ok">未触发</div>
+        </div>
+      </section>
+
+      <section class="motors" id="motors"></section>
+
+      <section>
+        <div class="section-title">通信日志</div>
+        <div id="log" class="log"></div>
+      </section>
+    </main>
+  </div>
+
+  <template id="motorTemplate">
+    <article class="motor">
+      <div class="motor-head">
+        <h2></h2>
+        <div class="mode">
+          <button data-mode="angle">位置</button>
+          <button data-mode="velocity">速度</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div>
+          <div class="label">当前位置 rad</div>
+          <div class="value" data-readout="angle">--</div>
+        </div>
+        <div>
+          <div class="label">当前速度 rad/s</div>
+          <div class="value" data-readout="velocity">--</div>
+        </div>
+        <div>
+          <div class="label">使能状态</div>
+          <div class="value" data-readout="enabled">--</div>
+        </div>
+      </div>
+
+      <div class="control-grid">
+        <label>
+          <span class="label">目标值</span>
+          <input type="number" step="0.001" data-target>
+        </label>
+        <label>
+          <span class="label">电压限制 V</span>
+          <input type="number" step="0.01" data-limit="voltage">
+        </label>
+        <label>
+          <span class="label">速度限制 rad/s</span>
+          <input type="number" step="0.01" data-limit="velocity">
+        </label>
+        <button data-enable>启用</button>
+      </div>
+
+      <div class="section-title">速度环 PID</div>
+      <div class="pid-grid" data-loop="vel"></div>
+
+      <div class="section-title">位置环 PID</div>
+      <div class="pid-grid" data-loop="angle"></div>
+    </article>
+  </template>
+
+  <script>
+    const state = {
+      port: null,
+      reader: null,
+      writer: null,
+      readAbort: false,
+      motors: [{}, {}]
+    };
+
+    const els = {
+      baud: document.querySelector('#baud'),
+      connect: document.querySelector('#connect'),
+      disconnect: document.querySelector('#disconnect'),
+      estop: document.querySelector('#estop'),
+      serialStatus: document.querySelector('#serialStatus'),
+      vin: document.querySelector('#vin'),
+      uv: document.querySelector('#uv'),
+      estopStatus: document.querySelector('#estopStatus'),
+      motors: document.querySelector('#motors'),
+      log: document.querySelector('#log'),
+      template: document.querySelector('#motorTemplate')
+    };
+
+    const pidFields = [
+      ['P', 'P', '0.001'],
+      ['I', 'I', '0.001'],
+      ['D', 'D', '0.001'],
+      ['limit', 'limit', '0.01'],
+      ['output_ramp', 'ramp', '1']
+    ];
+
+    if (!('serial' in navigator)) {
+      document.body.classList.add('no-serial');
+      els.connect.disabled = true;
+    }
+
+    function buildMotors() {
+      for (let index = 0; index < 2; index += 1) {
+        const node = els.template.content.cloneNode(true);
+        const article = node.querySelector('.motor');
+        article.dataset.motor = String(index);
+        node.querySelector('h2').textContent = `motor${index}`;
+
+        for (const grid of node.querySelectorAll('.pid-grid')) {
+          const loop = grid.dataset.loop;
+          for (const [param, label, step] of pidFields) {
+            const wrapper = document.createElement('label');
+            wrapper.innerHTML = `<span class="label">${label}</span>`;
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.step = step;
+            input.dataset.pidLoop = loop;
+            input.dataset.pidParam = param;
+            wrapper.append(input);
+            grid.append(wrapper);
+          }
+        }
+
+        els.motors.append(node);
+      }
+    }
+
+    buildMotors();
+
+    els.connect.addEventListener('click', connect);
+    els.disconnect.addEventListener('click', disconnect);
+    els.estop.addEventListener('click', () => sendCommand('ESTOP'));
+
+    els.motors.addEventListener('click', event => {
+      const article = event.target.closest('.motor');
+      if (!article) return;
+      const motor = Number(article.dataset.motor);
+
+      if (event.target.matches('[data-mode]')) {
+        sendCommand(`MODE,${motor},${event.target.dataset.mode}`);
+      }
+
+      if (event.target.matches('[data-enable]')) {
+        const current = state.motors[motor]?.requested ?? state.motors[motor]?.enabled;
+        sendCommand(`ENABLE,${motor},${current ? 0 : 1}`);
+      }
+    });
+
+    els.motors.addEventListener('change', event => {
+      const article = event.target.closest('.motor');
+      if (!article || !event.target.matches('input')) return;
+
+      const motor = Number(article.dataset.motor);
+      const value = event.target.value;
+      if (value === '') return;
+
+      if (event.target.matches('[data-target]')) {
+        sendCommand(`TARGET,${motor},${value}`);
+      } else if (event.target.matches('[data-limit]')) {
+        sendCommand(`LIMIT,${motor},${event.target.dataset.limit},${value}`);
+      } else if (event.target.matches('[data-pid-loop]')) {
+        sendCommand(`PID,${motor},${event.target.dataset.pidLoop},${event.target.dataset.pidParam},${value}`);
+      }
+    });
+
+    els.motors.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && event.target.matches('input')) {
+        event.target.blur();
+      }
+    });
+
+    async function connect() {
+      try {
+        state.port = await navigator.serial.requestPort();
+        await state.port.open({ baudRate: Number(els.baud.value) });
+        state.writer = state.port.writable.getWriter();
+        state.readAbort = false;
+        setConnected(true);
+        logLine('ui', `connected at ${els.baud.value} baud`);
+        readLoop();
+      } catch (error) {
+        logLine('err', error.message);
+        await disconnect();
+      }
+    }
+
+    async function disconnect() {
+      state.readAbort = true;
+      try {
+        if (state.reader) {
+          await state.reader.cancel();
+          state.reader.releaseLock();
+        }
+      } catch (_) {
+      } finally {
+        state.reader = null;
+      }
+
+      try {
+        if (state.writer) {
+          state.writer.releaseLock();
+        }
+      } catch (_) {
+      } finally {
+        state.writer = null;
+      }
+
+      try {
+        if (state.port) {
+          await state.port.close();
+        }
+      } catch (_) {
+      } finally {
+        state.port = null;
+        setConnected(false);
+      }
+    }
+
+    async function readLoop() {
+      const decoder = new TextDecoder();
+      let pending = '';
+
+      try {
+        state.reader = state.port.readable.getReader();
+        while (!state.readAbort) {
+          const { value, done } = await state.reader.read();
+          if (done) break;
+          pending += decoder.decode(value, { stream: true });
+          const lines = pending.split(/\r?\n/);
+          pending = lines.pop() ?? '';
+          for (const line of lines) {
+            handleLine(line.trim());
+          }
+        }
+      } catch (error) {
+        if (!state.readAbort) {
+          logLine('err', error.message);
+        }
+      } finally {
+        if (state.reader) {
+          state.reader.releaseLock();
+          state.reader = null;
+        }
+        if (!state.readAbort) {
+          await disconnect();
+        }
+      }
+    }
+
+    function handleLine(line) {
+      if (!line) return;
+      if (!line.startsWith('{')) {
+        logLine('raw', line);
+        return;
+      }
+
+      try {
+        const message = JSON.parse(line);
+        if (message.type === 'tel') {
+          renderTelemetry(message);
+        } else if (message.type === 'ack') {
+          logLine('ack', message.cmd);
+        } else if (message.type === 'err') {
+          logLine('err', `${message.cmd}: ${message.message}`);
+        } else {
+          logLine(message.type || 'json', line);
+        }
+      } catch (error) {
+        logLine('parse', line);
+      }
+    }
+
+    async function sendCommand(command) {
+      if (!state.writer) {
+        logLine('err', 'serial is not connected');
+        return;
+      }
+
+      const bytes = new TextEncoder().encode(`${command}\n`);
+      try {
+        await state.writer.write(bytes);
+        logLine('tx', command);
+      } catch (error) {
+        logLine('err', error.message);
+      }
+    }
+
+    function renderTelemetry(message) {
+      els.vin.textContent = `${format(message.vin, 2)} V`;
+      els.uv.textContent = message.underVoltage ? '欠压' : '正常';
+      els.uv.className = `value ${message.underVoltage ? 'warn' : 'ok'}`;
+      els.estopStatus.textContent = message.estop ? '已触发' : '未触发';
+      els.estopStatus.className = `value ${message.estop ? 'warn' : 'ok'}`;
+
+      for (const motor of message.motors || []) {
+        state.motors[motor.index] = motor;
+        const article = els.motors.querySelector(`[data-motor="${motor.index}"]`);
+        if (!article) continue;
+
+        setText(article, 'angle', format(motor.angle, 4));
+        setText(article, 'velocity', format(motor.velocity, 4));
+        const enabled = article.querySelector('[data-readout="enabled"]');
+        enabled.textContent = motor.enabled ? '启用' : '关闭';
+        enabled.className = `value ${motor.enabled ? 'enable-on' : 'enable-off'}`;
+
+        article.querySelectorAll('[data-mode]').forEach(button => {
+          button.classList.toggle('active', button.dataset.mode === motor.mode);
+        });
+
+        setInput(article.querySelector('[data-target]'), motor.target, 4);
+        setInput(article.querySelector('[data-limit="voltage"]'), motor.limits?.voltage, 4);
+        setInput(article.querySelector('[data-limit="velocity"]'), motor.limits?.velocity, 4);
+
+        setPidInputs(article, 'vel', motor.velocityPID);
+        setPidInputs(article, 'angle', motor.anglePID);
+
+        const enableButton = article.querySelector('[data-enable]');
+        enableButton.textContent = motor.requested ? '关闭' : '启用';
+      }
+    }
+
+    function setPidInputs(article, loop, pid) {
+      if (!pid) return;
+      for (const [param] of pidFields) {
+        const input = article.querySelector(`[data-pid-loop="${loop}"][data-pid-param="${param}"]`);
+        setInput(input, pid[param], param === 'output_ramp' ? 2 : 6);
+      }
+    }
+
+    function setInput(input, value, digits) {
+      if (!input || document.activeElement === input || value === undefined || value === null) return;
+      input.value = Number(value).toFixed(digits).replace(/\.?0+$/, '');
+    }
+
+    function setText(parent, key, value) {
+      const node = parent.querySelector(`[data-readout="${key}"]`);
+      if (node) node.textContent = value;
+    }
+
+    function format(value, digits) {
+      if (!Number.isFinite(Number(value))) return '--';
+      return Number(value).toFixed(digits);
+    }
+
+    function setConnected(connected) {
+      els.serialStatus.textContent = connected ? '已连接' : '未连接';
+      els.serialStatus.className = `value ${connected ? 'ok' : 'warn'}`;
+      els.connect.disabled = connected || !('serial' in navigator);
+      els.disconnect.disabled = !connected;
+      els.estop.disabled = !connected;
+      els.baud.disabled = connected;
+    }
+
+    function logLine(kind, text) {
+      const stamp = new Date().toLocaleTimeString();
+      els.log.textContent += `[${stamp}] ${kind}: ${text}\n`;
+      els.log.scrollTop = els.log.scrollHeight;
+    }
+
+    window.addEventListener('beforeunload', () => {
+      if (state.port) {
+        disconnect();
+      }
+    });
+  </script>
+</body>
+</html>

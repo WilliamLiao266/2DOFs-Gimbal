@@ -1,128 +1,138 @@
 /**
-Deng's FOC 闭环位置控制例程 测试库：SimpleFOC 2.2.1 测试硬件：DengFOC-V4
-在串口窗口中输入：T+位置，就可以使得两个电机闭环转动
-比如让两个电机都转动180°，则输入其弧度制：T3.14
-在使用自己的电机时，请一定记得修改默认极对数，即 BLDCMotor(7) 中的值，设置为自己的极对数数字
-默认PID针对的电机是 2208 ，使用自己的电机需要修改PID参数，才能实现更好效果
-*/
+ * Dual motor SimpleFOC PID tuner firmware.
+ *
+ * Serial protocol, newline terminated:
+ *   MODE,0,angle
+ *   TARGET,1,12.5
+ *   PID,0,vel,P,0.015
+ *   PID,1,angle,ramp,1000
+ *   LIMIT,0,voltage,12
+ *   LIMIT,1,velocity,20
+ *   ENABLE,0,1
+ *   ESTOP
+ */
 
 #include <SimpleFOC.h>
+#include <ctype.h>
+#include <stdlib.h>
+#include <string.h>
 
 MagneticSensorI2C sensor = MagneticSensorI2C(AS5600_I2C);
 MagneticSensorI2C sensor1 = MagneticSensorI2C(AS5600_I2C);
 TwoWire I2Cone = TwoWire(0);
 TwoWire I2Ctwo = TwoWire(1);
 
-//电机参数
+// Motor parameters
 BLDCMotor motor = BLDCMotor(7);
 BLDCDriver3PWM driver = BLDCDriver3PWM(32, 33, 25, 12);
 
 BLDCMotor motor1 = BLDCMotor(6);
 BLDCDriver3PWM driver1 = BLDCDriver3PWM(26, 27, 14, 12);
 
-//命令设置
-float target_angle = 0;
-uint32_t prev_millis;
+#define UNDERVOLTAGE_THRES 11.1f
+#define SERIAL_BAUD 230400
+#define TELEMETRY_PERIOD_MS 50
+#define BOARD_CHECK_PERIOD_MS 1000
+#define COMMAND_BUFFER_SIZE 96
 
-//设置报警电压
-#define UNDERVOLTAGE_THRES 11.1
+BLDCMotor *motors[] = {&motor, &motor1};
+float targets[] = {0.0f, 0.0f};
+bool requested_enable[] = {true, true};
 
-Commander command = Commander(Serial);
-void doTarget(char *cmd)
-{
-  command.scalar(&target_angle, cmd);
-}
+uint32_t prev_board_check_millis = 0;
+uint32_t prev_telemetry_millis = 0;
+bool flag_under_voltage = false;
+bool emergency_stop = false;
+char command_buffer[COMMAND_BUFFER_SIZE];
+uint8_t command_length = 0;
 
 void board_check();
 float get_vin_Volt();
 void board_init();
-bool flag_under_voltage = false;
+void handle_serial();
+void handle_command(char *line);
+void send_telemetry();
+void send_ack(const char *cmd);
+void send_error(const char *cmd, const char *message);
+void apply_enable_state();
+BLDCMotor *select_motor(const char *token, int *motor_index);
+bool equals_ignore_case(const char *left, const char *right);
+bool parse_float(const char *token, float *value);
+bool parse_bool(const char *token, bool *value);
+const char *mode_name(BLDCMotor *selected_motor);
+void print_pid(PIDController &pid);
+void print_motor_json(int index);
 
 void setup()
 {
-  Serial.begin(115200);
+  Serial.begin(SERIAL_BAUD);
   board_init();
 
   I2Cone.begin(19, 18, 400000UL); // AS5600_M0
   I2Ctwo.begin(23, 5, 400000UL);  // AS5600_M1
   sensor.init(&I2Cone);
   sensor1.init(&I2Ctwo);
-  //连接motor对象与传感器对象
+
   motor.linkSensor(&sensor);
   motor1.linkSensor(&sensor1);
 
-  //供电电压设置 [V]
   driver.voltage_power_supply = get_vin_Volt();
   driver.init();
 
   driver1.voltage_power_supply = get_vin_Volt();
   driver1.init();
-  //连接电机和driver对象
+
   motor.linkDriver(&driver);
   motor1.linkDriver(&driver1);
 
-  // FOC模型选择
   motor.foc_modulation = FOCModulationType::SpaceVectorPWM;
   motor1.foc_modulation = FOCModulationType::SpaceVectorPWM;
-  //运动控制模式设置
+
   motor.controller = MotionControlType::angle;
   motor1.controller = MotionControlType::angle;
 
-  //速度PI环设置
-  motor.PID_velocity.P = 0.015;
-  motor1.PID_velocity.P = 0.010;
-  motor.PID_velocity.I = 0.12;
-  motor1.PID_velocity.I = 0.12;
-  //角度P环设置
-  motor.P_angle.P = 10;
-  motor1.P_angle.P = 10;
-  //最大电机限制电机
-  motor.voltage_limit = get_vin_Volt();  //
-  motor1.voltage_limit = get_vin_Volt(); //
+  motor.PID_velocity.P = 0.015f;
+  motor1.PID_velocity.P = 0.010f;
+  motor.PID_velocity.I = 0.12f;
+  motor1.PID_velocity.I = 0.12f;
 
-  //速度低通滤波时间常数
-  motor.LPF_velocity.Tf = 0.01;
-  motor1.LPF_velocity.Tf = 0.01;
+  motor.P_angle.P = 10.0f;
+  motor1.P_angle.P = 10.0f;
 
-  //设置最大速度限制
-  motor.velocity_limit = 20;
-  motor1.velocity_limit = 20;
+  motor.voltage_limit = get_vin_Volt();
+  motor1.voltage_limit = get_vin_Volt();
+  motor.PID_velocity.limit = motor.voltage_limit;
+  motor1.PID_velocity.limit = motor1.voltage_limit;
 
-  motor.useMonitoring(Serial);
-  motor1.useMonitoring(Serial);
+  motor.LPF_velocity.Tf = 0.01f;
+  motor1.LPF_velocity.Tf = 0.01f;
 
-  //初始化电机
+  motor.velocity_limit = 20.0f;
+  motor1.velocity_limit = 20.0f;
+  motor.P_angle.limit = motor.velocity_limit;
+  motor1.P_angle.limit = motor1.velocity_limit;
+
   motor.init();
   motor1.init();
-  //初始化 FOC
+
   motor.initFOC();
   motor1.initFOC();
-  command.add('T', doTarget, "target angle");
+  apply_enable_state();
 
-  Serial.println(F("Motor ready."));
-  Serial.println(F("Set the target velocity using serial terminal:"));
+  Serial.println(F("{\"type\":\"ready\",\"message\":\"dual_pid_tuner\"}"));
 }
 
 void loop()
 {
-
   motor.loopFOC();
   motor1.loopFOC();
 
-  motor.move(target_angle);
-  motor1.move(target_angle);
+  motor.move(targets[0]);
+  motor1.move(targets[1]);
 
-  //电压低于设定值时电机失能
   board_check();
-
-  //用户通讯
-  if (!flag_under_voltage)
-    command.run();
-
-  // Serial.print(sensor.getAngle());
-  // Serial.print(" - ");
-  // Serial.print(sensor1.getAngle());
-  // Serial.println();
+  handle_serial();
+  send_telemetry();
 }
 
 void board_init()
@@ -141,56 +151,444 @@ void board_init()
   {
     VIN_Volt = get_vin_Volt();
     delay(100);
-    Serial.printf("等待上电,当前电压%.2f\n", VIN_Volt);
+    Serial.printf("{\"type\":\"wait_power\",\"vin\":%.2f}\n", VIN_Volt);
   }
-  Serial.printf("正在校准电机...当前电压%.2f\n", VIN_Volt);
+  Serial.printf("{\"type\":\"calibrating\",\"vin\":%.2f}\n", VIN_Volt);
 }
 
 float get_vin_Volt()
 {
-  return analogReadMilliVolts(13) * 8.5 / 1000;
+  return analogReadMilliVolts(13) * 8.5f / 1000.0f;
 }
 
 void board_check()
 {
-
   uint32_t curr_millis = millis();
-  static uint8_t enableState = 0;
 
-  if (curr_millis - prev_millis >= 1000)
+  if (curr_millis - prev_board_check_millis < BOARD_CHECK_PERIOD_MS)
   {
-    float vin_Volt = get_vin_Volt();
+    return;
+  }
 
-    if (vin_Volt < UNDERVOLTAGE_THRES)
+  float vin_Volt = get_vin_Volt();
+  bool now_under_voltage = vin_Volt < UNDERVOLTAGE_THRES;
+
+  if (now_under_voltage)
+  {
+    uint8_t count = 5;
+    while (count--)
     {
-      flag_under_voltage = true;
-      enableState = 0;
-      uint8_t count = 5;
-      while (count--)
+      vin_Volt = get_vin_Volt();
+      if (vin_Volt > UNDERVOLTAGE_THRES)
       {
-        vin_Volt = get_vin_Volt();
-        if (vin_Volt > UNDERVOLTAGE_THRES)
-        {
-          flag_under_voltage = false;
-          break;
-        }
+        now_under_voltage = false;
+        break;
       }
+    }
+  }
+
+  flag_under_voltage = now_under_voltage;
+  apply_enable_state();
+  prev_board_check_millis = curr_millis;
+}
+
+void apply_enable_state()
+{
+  for (uint8_t i = 0; i < 2; i++)
+  {
+    if (flag_under_voltage || emergency_stop || !requested_enable[i])
+    {
+      motors[i]->disable();
+    }
+    else if (!motors[i]->enabled)
+    {
+      motors[i]->enable();
+    }
+  }
+}
+
+void handle_serial()
+{
+  while (Serial.available())
+  {
+    char ch = (char)Serial.read();
+    if (ch == '\n' || ch == '\r')
+    {
+      if (command_length > 0)
+      {
+        command_buffer[command_length] = '\0';
+        handle_command(command_buffer);
+        command_length = 0;
+      }
+      continue;
+    }
+
+    if (command_length < COMMAND_BUFFER_SIZE - 1)
+    {
+      command_buffer[command_length++] = ch;
     }
     else
     {
-      flag_under_voltage = false;
+      command_length = 0;
+      send_error("BUFFER", "command too long");
     }
-    if (flag_under_voltage)
+  }
+}
+
+void handle_command(char *line)
+{
+  char original[COMMAND_BUFFER_SIZE];
+  strncpy(original, line, sizeof(original));
+  original[sizeof(original) - 1] = '\0';
+
+  char *cmd = strtok(line, ",");
+  if (!cmd)
+  {
+    send_error("EMPTY", "missing command");
+    return;
+  }
+
+  if (equals_ignore_case(cmd, "ESTOP"))
+  {
+    emergency_stop = true;
+    requested_enable[0] = false;
+    requested_enable[1] = false;
+    apply_enable_state();
+    send_ack(original);
+    return;
+  }
+
+  char *motor_token = strtok(NULL, ",");
+  int motor_index = -1;
+  BLDCMotor *selected_motor = select_motor(motor_token, &motor_index);
+  if (!selected_motor)
+  {
+    send_error(original, "invalid motor index");
+    return;
+  }
+
+  if (equals_ignore_case(cmd, "MODE"))
+  {
+    char *mode = strtok(NULL, ",");
+    if (equals_ignore_case(mode, "angle") || equals_ignore_case(mode, "position"))
     {
-      motor.disable();
-      motor1.disable();
+      selected_motor->controller = MotionControlType::angle;
+      send_ack(original);
     }
-    else if (0 == enableState && flag_under_voltage == false)
+    else if (equals_ignore_case(mode, "velocity") || equals_ignore_case(mode, "speed"))
     {
-      enableState = 1;
-      motor.enable();
-      motor1.enable();
+      selected_motor->controller = MotionControlType::velocity;
+      send_ack(original);
     }
-    prev_millis = curr_millis;
+    else
+    {
+      send_error(original, "invalid mode");
+    }
+    return;
+  }
+
+  if (equals_ignore_case(cmd, "TARGET"))
+  {
+    float value = 0.0f;
+    if (!parse_float(strtok(NULL, ","), &value))
+    {
+      send_error(original, "invalid target");
+      return;
+    }
+    targets[motor_index] = value;
+    send_ack(original);
+    return;
+  }
+
+  if (equals_ignore_case(cmd, "PID"))
+  {
+    char *loop = strtok(NULL, ",");
+    char *param = strtok(NULL, ",");
+    float value = 0.0f;
+    if (!loop || !param || !parse_float(strtok(NULL, ","), &value))
+    {
+      send_error(original, "invalid pid command");
+      return;
+    }
+
+    PIDController *pid = nullptr;
+    if (equals_ignore_case(loop, "vel") || equals_ignore_case(loop, "velocity") || equals_ignore_case(loop, "speed"))
+    {
+      pid = &selected_motor->PID_velocity;
+    }
+    else if (equals_ignore_case(loop, "angle") || equals_ignore_case(loop, "position") || equals_ignore_case(loop, "pos"))
+    {
+      pid = &selected_motor->P_angle;
+    }
+    else
+    {
+      send_error(original, "invalid pid loop");
+      return;
+    }
+
+    if (equals_ignore_case(param, "P"))
+    {
+      pid->P = value;
+    }
+    else if (equals_ignore_case(param, "I"))
+    {
+      pid->I = value;
+    }
+    else if (equals_ignore_case(param, "D"))
+    {
+      pid->D = value;
+    }
+    else if (equals_ignore_case(param, "limit"))
+    {
+      pid->limit = value;
+      if (pid == &selected_motor->P_angle)
+      {
+        selected_motor->velocity_limit = value;
+      }
+    }
+    else if (equals_ignore_case(param, "ramp") || equals_ignore_case(param, "output_ramp"))
+    {
+      pid->output_ramp = value;
+    }
+    else
+    {
+      send_error(original, "invalid pid parameter");
+      return;
+    }
+
+    send_ack(original);
+    return;
+  }
+
+  if (equals_ignore_case(cmd, "LIMIT"))
+  {
+    char *limit_name = strtok(NULL, ",");
+    float value = 0.0f;
+    if (!limit_name || !parse_float(strtok(NULL, ","), &value))
+    {
+      send_error(original, "invalid limit command");
+      return;
+    }
+
+    if (equals_ignore_case(limit_name, "voltage") || equals_ignore_case(limit_name, "volt"))
+    {
+      selected_motor->voltage_limit = value;
+      selected_motor->PID_velocity.limit = value;
+    }
+    else if (equals_ignore_case(limit_name, "velocity") || equals_ignore_case(limit_name, "speed"))
+    {
+      selected_motor->velocity_limit = value;
+      selected_motor->P_angle.limit = value;
+    }
+    else if (equals_ignore_case(limit_name, "ramp") || equals_ignore_case(limit_name, "output_ramp"))
+    {
+      selected_motor->PID_velocity.output_ramp = value;
+    }
+    else
+    {
+      send_error(original, "invalid limit");
+      return;
+    }
+
+    send_ack(original);
+    return;
+  }
+
+  if (equals_ignore_case(cmd, "ENABLE"))
+  {
+    bool enabled = false;
+    if (!parse_bool(strtok(NULL, ","), &enabled))
+    {
+      send_error(original, "invalid enable value");
+      return;
+    }
+
+    emergency_stop = false;
+    requested_enable[motor_index] = enabled;
+    apply_enable_state();
+    send_ack(original);
+    return;
+  }
+
+  send_error(original, "unknown command");
+}
+
+void send_telemetry()
+{
+  uint32_t curr_millis = millis();
+  if (curr_millis - prev_telemetry_millis < TELEMETRY_PERIOD_MS)
+  {
+    return;
+  }
+
+  Serial.print(F("{\"type\":\"tel\",\"vin\":"));
+  Serial.print(get_vin_Volt(), 2);
+  Serial.print(F(",\"underVoltage\":"));
+  Serial.print(flag_under_voltage ? 1 : 0);
+  Serial.print(F(",\"estop\":"));
+  Serial.print(emergency_stop ? 1 : 0);
+  Serial.print(F(",\"motors\":["));
+  print_motor_json(0);
+  Serial.print(',');
+  print_motor_json(1);
+  Serial.println(F("]}"));
+
+  prev_telemetry_millis = curr_millis;
+}
+
+void print_motor_json(int index)
+{
+  BLDCMotor *selected_motor = motors[index];
+  Serial.print(F("{\"index\":"));
+  Serial.print(index);
+  Serial.print(F(",\"enabled\":"));
+  Serial.print(selected_motor->enabled ? 1 : 0);
+  Serial.print(F(",\"requested\":"));
+  Serial.print(requested_enable[index] ? 1 : 0);
+  Serial.print(F(",\"mode\":\""));
+  Serial.print(mode_name(selected_motor));
+  Serial.print(F("\",\"target\":"));
+  Serial.print(targets[index], 4);
+  Serial.print(F(",\"angle\":"));
+  Serial.print(selected_motor->shaft_angle, 4);
+  Serial.print(F(",\"velocity\":"));
+  Serial.print(selected_motor->shaft_velocity, 4);
+  Serial.print(F(",\"velocityPID\":"));
+  print_pid(selected_motor->PID_velocity);
+  Serial.print(F(",\"anglePID\":"));
+  print_pid(selected_motor->P_angle);
+  Serial.print(F(",\"limits\":{\"voltage\":"));
+  Serial.print(selected_motor->voltage_limit, 4);
+  Serial.print(F(",\"velocity\":"));
+  Serial.print(selected_motor->velocity_limit, 4);
+  Serial.print(F(",\"ramp\":"));
+  Serial.print(selected_motor->PID_velocity.output_ramp, 4);
+  Serial.print(F("}}"));
+}
+
+void print_pid(PIDController &pid)
+{
+  Serial.print(F("{\"P\":"));
+  Serial.print(pid.P, 6);
+  Serial.print(F(",\"I\":"));
+  Serial.print(pid.I, 6);
+  Serial.print(F(",\"D\":"));
+  Serial.print(pid.D, 6);
+  Serial.print(F(",\"limit\":"));
+  Serial.print(pid.limit, 4);
+  Serial.print(F(",\"output_ramp\":"));
+  Serial.print(pid.output_ramp, 4);
+  Serial.print('}');
+}
+
+void send_ack(const char *cmd)
+{
+  Serial.print(F("{\"type\":\"ack\",\"cmd\":\""));
+  Serial.print(cmd);
+  Serial.println(F("\"}"));
+}
+
+void send_error(const char *cmd, const char *message)
+{
+  Serial.print(F("{\"type\":\"err\",\"cmd\":\""));
+  Serial.print(cmd ? cmd : "");
+  Serial.print(F("\",\"message\":\""));
+  Serial.print(message);
+  Serial.println(F("\"}"));
+}
+
+BLDCMotor *select_motor(const char *token, int *motor_index)
+{
+  if (!token || !motor_index)
+  {
+    return nullptr;
+  }
+
+  char *end = nullptr;
+  long index = strtol(token, &end, 10);
+  if (end == token || *end != '\0')
+  {
+    return nullptr;
+  }
+
+  if (index < 0 || index > 1)
+  {
+    return nullptr;
+  }
+
+  *motor_index = (int)index;
+  return motors[*motor_index];
+}
+
+bool equals_ignore_case(const char *left, const char *right)
+{
+  if (!left || !right)
+  {
+    return false;
+  }
+
+  while (*left && *right)
+  {
+    if (tolower((unsigned char)*left) != tolower((unsigned char)*right))
+    {
+      return false;
+    }
+    left++;
+    right++;
+  }
+
+  return *left == '\0' && *right == '\0';
+}
+
+bool parse_float(const char *token, float *value)
+{
+  if (!token || !value)
+  {
+    return false;
+  }
+
+  char *end = nullptr;
+  float parsed = strtof(token, &end);
+  if (end == token || *end != '\0')
+  {
+    return false;
+  }
+
+  *value = parsed;
+  return true;
+}
+
+bool parse_bool(const char *token, bool *value)
+{
+  if (!token || !value)
+  {
+    return false;
+  }
+
+  if (equals_ignore_case(token, "1") || equals_ignore_case(token, "true") || equals_ignore_case(token, "on"))
+  {
+    *value = true;
+    return true;
+  }
+
+  if (equals_ignore_case(token, "0") || equals_ignore_case(token, "false") || equals_ignore_case(token, "off"))
+  {
+    *value = false;
+    return true;
+  }
+
+  return false;
+}
+
+const char *mode_name(BLDCMotor *selected_motor)
+{
+  switch (selected_motor->controller)
+  {
+  case MotionControlType::velocity:
+    return "velocity";
+  case MotionControlType::angle:
+    return "angle";
+  default:
+    return "other";
   }
 }
