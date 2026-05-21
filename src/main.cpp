@@ -14,6 +14,7 @@
 
 #include <SimpleFOC.h>
 #include <ctype.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -62,6 +63,7 @@ bool parse_bool(const char *token, bool *value);
 const char *mode_name(BLDCMotor *selected_motor);
 void print_pid(PIDController &pid);
 void print_motor_json(int index);
+float angle_rad_to_degrees_0_360(float angle_rad);
 
 void setup()
 {
@@ -450,6 +452,8 @@ void print_motor_json(int index)
   Serial.print(F("\",\"target\":"));
   Serial.print(targets[index], 4);
   Serial.print(F(",\"angle\":"));
+  Serial.print(angle_rad_to_degrees_0_360(selected_motor->shaft_angle), 2);
+  Serial.print(F(",\"rawAngleRad\":"));
   Serial.print(selected_motor->shaft_angle, 4);
   Serial.print(F(",\"velocity\":"));
   Serial.print(selected_motor->shaft_velocity, 4);
@@ -591,4 +595,14 @@ const char *mode_name(BLDCMotor *selected_motor)
   default:
     return "other";
   }
+}
+
+float angle_rad_to_degrees_0_360(float angle_rad)
+{
+  float normalized = fmodf(angle_rad, _2PI);
+  if (normalized < 0.0f)
+  {
+    normalized += _2PI;
+  }
+  return normalized * 180.0f / _PI;
 }

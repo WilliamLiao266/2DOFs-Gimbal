@@ -374,7 +374,7 @@
 
       <div class="grid">
         <div>
-          <div class="label">当前位置 rad</div>
+          <div class="label">当前位置 deg</div>
           <div class="value" data-readout="angle">--</div>
         </div>
         <div>
@@ -645,7 +645,7 @@
         const article = els.motors.querySelector(`[data-motor="${motor.index}"]`);
         if (!article) continue;
 
-        setText(article, 'angle', format(motor.angle, 4));
+        setText(article, 'angle', format(motor.angle, 2));
         setText(article, 'velocity', format(motor.velocity, 4));
         const enabled = article.querySelector('[data-readout="enabled"]');
         enabled.textContent = motor.enabled ? '启用' : '关闭';
