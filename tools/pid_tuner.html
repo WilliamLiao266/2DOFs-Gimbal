@@ -181,6 +181,142 @@
       gap: 16px;
     }
 
+    .gimbal {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 14px;
+    }
+
+    .gimbal-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .gimbal-tools {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .gimbal-tools label {
+      display: grid;
+      grid-template-columns: auto minmax(92px, 1fr);
+      gap: 8px;
+      align-items: center;
+    }
+
+    .gimbal-body {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) 188px minmax(180px, 0.8fr);
+      gap: 18px;
+      align-items: center;
+    }
+
+    .axis-visual {
+      display: grid;
+      gap: 9px;
+    }
+
+    .axis-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .axis-track {
+      position: relative;
+      min-height: 56px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #f1f5f2;
+      overflow: hidden;
+    }
+
+    .axis-track.vertical {
+      width: 76px;
+      min-height: 190px;
+      justify-self: center;
+    }
+
+    .axis-fill {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 50%;
+      height: 100%;
+      background: rgba(15, 139, 111, 0.14);
+    }
+
+    .axis-track.vertical .axis-fill {
+      width: 100%;
+      height: 50%;
+    }
+
+    .axis-marker {
+      position: absolute;
+      width: 3px;
+      top: 8px;
+      bottom: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+      transform: translateX(-50%);
+    }
+
+    .axis-marker.target {
+      background: var(--warn);
+    }
+
+    .axis-track.vertical .axis-marker {
+      width: auto;
+      height: 3px;
+      left: 8px;
+      right: 8px;
+      top: auto;
+      bottom: 50%;
+      transform: translateY(50%);
+    }
+
+    .axis-values {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .gimbal-pad {
+      display: grid;
+      grid-template-columns: repeat(3, 56px);
+      grid-template-rows: repeat(3, 46px);
+      gap: 8px;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .gimbal-pad button {
+      min-width: 56px;
+      min-height: 46px;
+      padding: 0;
+      font-size: 18px;
+      font-weight: 800;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .gimbal-pad .home {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
     .motor {
       background: var(--panel);
       border: 1px solid var(--border);
@@ -289,12 +425,18 @@
 
     @media (max-width: 980px) {
       .bar,
+      .gimbal-body,
       .motors,
       .status {
         grid-template-columns: 1fr;
       }
 
       .toolbar {
+        justify-content: flex-start;
+      }
+
+      .gimbal-head,
+      .gimbal-tools {
         justify-content: flex-start;
       }
     }
@@ -350,6 +492,70 @@
         <div class="metric">
           <div class="label">急停状态</div>
           <div id="estopStatus" class="value ok">未触发</div>
+        </div>
+      </section>
+
+      <section class="gimbal" id="gimbal">
+        <div class="gimbal-head">
+          <h2>Gimbal Control</h2>
+          <div class="gimbal-tools">
+            <label>
+              <span class="label">步长 deg</span>
+              <select id="jogStep">
+                <option value="0.5">0.5</option>
+                <option value="1" selected>1</option>
+                <option value="5">5</option>
+                <option value="10">10</option>
+              </select>
+            </label>
+            <button id="homeGimbal">Home</button>
+          </div>
+        </div>
+
+        <div class="gimbal-body">
+          <div class="axis-visual" data-axis-panel="0">
+            <div class="axis-title">
+              <span>Yaw / motor0</span>
+              <span data-axis-readout="0">-- deg</span>
+            </div>
+            <div class="axis-track">
+              <div class="axis-fill" data-axis-fill="0"></div>
+              <div class="axis-marker" data-axis-current="0"></div>
+              <div class="axis-marker target" data-axis-target="0"></div>
+            </div>
+            <div class="axis-values">
+              <span data-axis-min="0">--</span>
+              <span data-axis-max="0">--</span>
+            </div>
+          </div>
+
+          <div class="gimbal-pad">
+            <span></span>
+            <button data-jog-motor="1" data-jog-dir="1" title="Pitch angle +">↑</button>
+            <span></span>
+            <button data-jog-motor="0" data-jog-dir="1" title="Yaw angle +">←</button>
+            <button id="padHome" class="home">Home</button>
+            <button data-jog-motor="0" data-jog-dir="-1" title="Yaw angle -">→</button>
+            <span></span>
+            <button data-jog-motor="1" data-jog-dir="-1" title="Pitch angle -">↓</button>
+            <span></span>
+          </div>
+
+          <div class="axis-visual" data-axis-panel="1">
+            <div class="axis-title">
+              <span>Pitch / motor1</span>
+              <span data-axis-readout="1">-- deg</span>
+            </div>
+            <div class="axis-track vertical">
+              <div class="axis-fill" data-axis-fill="1"></div>
+              <div class="axis-marker" data-axis-current="1"></div>
+              <div class="axis-marker target" data-axis-target="1"></div>
+            </div>
+            <div class="axis-values">
+              <span data-axis-min="1">--</span>
+              <span data-axis-max="1">--</span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -425,7 +631,9 @@
       reader: null,
       writer: null,
       readAbort: false,
-      motors: [{}, {}]
+      estop: false,
+      motors: [{}, {}],
+      activeJog: null
     };
 
     const els = {
@@ -437,10 +645,21 @@
       vin: document.querySelector('#vin'),
       uv: document.querySelector('#uv'),
       estopStatus: document.querySelector('#estopStatus'),
+      gimbal: document.querySelector('#gimbal'),
+      jogStep: document.querySelector('#jogStep'),
+      homeGimbal: document.querySelector('#homeGimbal'),
+      padHome: document.querySelector('#padHome'),
       motors: document.querySelector('#motors'),
       log: document.querySelector('#log'),
       template: document.querySelector('#motorTemplate')
     };
+
+    const axes = [
+      { name: 'Yaw', motor: 0, home: 90 },
+      { name: 'Pitch', motor: 1, home: 120 }
+    ];
+
+    const jogRepeatMs = 150;
 
     const pidFields = [
       ['P', 'P', '0.001'],
@@ -460,7 +679,7 @@
         const node = els.template.content.cloneNode(true);
         const article = node.querySelector('.motor');
         article.dataset.motor = String(index);
-        node.querySelector('h2').textContent = `motor${index}`;
+        node.querySelector('h2').textContent = `${axes[index].name} / motor${index}`;
 
         for (const grid of node.querySelectorAll('.pid-grid')) {
           const loop = grid.dataset.loop;
@@ -485,7 +704,24 @@
 
     els.connect.addEventListener('click', connect);
     els.disconnect.addEventListener('click', disconnect);
-    els.estop.addEventListener('click', () => sendCommand('ESTOP'));
+    els.estop.addEventListener('click', () => {
+      stopJog();
+      state.estop = true;
+      updateGimbalControls();
+      sendCommand('ESTOP');
+    });
+    els.homeGimbal.addEventListener('click', homeGimbal);
+    els.padHome.addEventListener('click', homeGimbal);
+    els.gimbal.addEventListener('pointerdown', event => {
+      const button = event.target.closest('[data-jog-motor]');
+      if (!button) return;
+      event.preventDefault();
+      startJog(button);
+    });
+    window.addEventListener('pointerup', stopJog);
+    window.addEventListener('pointercancel', stopJog);
+    window.addEventListener('blur', stopJog);
+    updateGimbalControls();
 
     els.motors.addEventListener('click', event => {
       const article = event.target.closest('.motor');
@@ -500,6 +736,9 @@
 
       if (event.target.matches('[data-enable]')) {
         const current = state.motors[motor]?.requested ?? state.motors[motor]?.enabled;
+        state.motors[motor] = { ...state.motors[motor], requested: current ? 0 : 1 };
+        if (current) stopJog();
+        updateGimbalControls();
         sendCommand(`ENABLE,${motor},${current ? 0 : 1}`);
       }
     });
@@ -516,12 +755,19 @@
         const mode = state.motors[motor]?.mode ?? 'angle';
         const target = mode === 'angle' ? clampAngleInput(value) : value;
         event.target.value = target;
+        state.motors[motor] = { ...state.motors[motor], target: Number(target) };
+        updateGimbalAxis(motor);
         sendCommand(`TARGET,${motor},${target}`);
       } else if (event.target.matches('[data-limit]')) {
         sendCommand(`LIMIT,${motor},${event.target.dataset.limit},${value}`);
       } else if (event.target.matches('[data-angle-limit]')) {
         const limit = clampAngleInput(value);
         event.target.value = limit;
+        state.motors[motor] = {
+          ...state.motors[motor],
+          limits: { ...(state.motors[motor]?.limits || {}), [event.target.dataset.angleLimit]: Number(limit) }
+        };
+        updateGimbalAxis(motor);
         sendCommand(`LIMIT,${motor},${event.target.dataset.angleLimit},${limit}`);
       } else if (event.target.matches('[data-pid-loop]')) {
         sendCommand(`PID,${motor},${event.target.dataset.pidLoop},${event.target.dataset.pidParam},${value}`);
@@ -533,6 +779,116 @@
         event.target.blur();
       }
     });
+
+    function startJog(button) {
+      const motor = Number(button.dataset.jogMotor);
+      const direction = Number(button.dataset.jogDir);
+      if (!canControlMotor(motor)) {
+        logLine('err', 'gimbal control is not ready');
+        return;
+      }
+
+      stopJog();
+      jogMotor(motor, direction);
+      state.activeJog = window.setInterval(() => jogMotor(motor, direction), jogRepeatMs);
+    }
+
+    function stopJog() {
+      if (state.activeJog) {
+        window.clearInterval(state.activeJog);
+        state.activeJog = null;
+      }
+    }
+
+    async function jogMotor(motor, direction) {
+      if (!canControlMotor(motor)) {
+        stopJog();
+        return;
+      }
+
+      await ensureAngleMode(motor);
+      const target = currentTargetForMotor(motor);
+      const nextTarget = clampAxisTarget(target + direction * currentJogStep(), motor);
+      state.motors[motor] = { ...state.motors[motor], target: nextTarget, mode: 'angle' };
+      syncMotorTargetInput(motor, nextTarget);
+      updateGimbalAxis(motor);
+      sendCommand(`TARGET,${motor},${formatCommandNumber(nextTarget)}`);
+    }
+
+    async function homeGimbal() {
+      stopJog();
+      for (const axis of axes) {
+        if (!canControlMotor(axis.motor)) continue;
+        await ensureAngleMode(axis.motor);
+        const target = clampAxisTarget(axis.home, axis.motor);
+        state.motors[axis.motor] = { ...state.motors[axis.motor], target, mode: 'angle' };
+        syncMotorTargetInput(axis.motor, target);
+        updateGimbalAxis(axis.motor);
+        sendCommand(`TARGET,${axis.motor},${formatCommandNumber(target)}`);
+      }
+    }
+
+    async function ensureAngleMode(motor) {
+      if (state.motors[motor]?.mode === 'angle') return;
+      state.motors[motor] = { ...state.motors[motor], mode: 'angle' };
+      const article = els.motors.querySelector(`[data-motor="${motor}"]`);
+      if (article) updateTargetControl(article, state.motors[motor]);
+      await sendCommand(`MODE,${motor},angle`);
+    }
+
+    function canControlMotor(motor) {
+      const selected = state.motors[motor];
+      if (!state.writer || state.readAbort || !selected || !selected.enabled || !selected.requested) {
+        return false;
+      }
+      return !state.estop;
+    }
+
+    function currentJogStep() {
+      const step = Number(els.jogStep.value);
+      return Number.isFinite(step) && step > 0 ? step : 1;
+    }
+
+    function currentTargetForMotor(motor) {
+      const selected = state.motors[motor] || {};
+      const target = Number(selected.target);
+      if (Number.isFinite(target)) return target;
+      const angle = Number(selected.angle);
+      if (Number.isFinite(angle)) return angle;
+      return axes[motor].home;
+    }
+
+    function axisLimits(motor) {
+      const limits = state.motors[motor]?.limits || {};
+      const minimum = Number.isFinite(Number(limits.angleMin)) ? Number(limits.angleMin) : 0;
+      const maximum = Number.isFinite(Number(limits.angleMax)) ? Number(limits.angleMax) : 360;
+      return { minimum, maximum };
+    }
+
+    function clampAxisTarget(value, motor) {
+      const { minimum, maximum } = axisLimits(motor);
+      const angle = Math.min(360, Math.max(0, Number(value)));
+      if (minimum <= maximum) {
+        return Math.min(maximum, Math.max(minimum, angle));
+      }
+      if (angle >= minimum || angle <= maximum) return angle;
+      return circularDistance(angle, minimum) <= circularDistance(angle, maximum) ? minimum : maximum;
+    }
+
+    function circularDistance(left, right) {
+      const distance = Math.abs(left - right);
+      return distance > 180 ? 360 - distance : distance;
+    }
+
+    function syncMotorTargetInput(motor, target) {
+      const article = els.motors.querySelector(`[data-motor="${motor}"]`);
+      if (!article) return;
+      setInput(article.querySelector('[data-target]'), target, 2);
+    }
+
+    function formatCommandNumber(value) {
+      return Number(value).toFixed(3).replace(/\.?0+$/, '');
+    }
 
     async function connect() {
       try {
@@ -651,6 +1007,7 @@
     }
 
     function renderTelemetry(message) {
+      state.estop = Boolean(message.estop);
       els.vin.textContent = `${format(message.vin, 2)} V`;
       els.uv.textContent = message.underVoltage ? '欠压' : '正常';
       els.uv.className = `value ${message.underVoltage ? 'warn' : 'ok'}`;
@@ -681,10 +1038,71 @@
 
         setPidInputs(article, 'vel', motor.velocityPID);
         setPidInputs(article, 'angle', motor.anglePID);
+        updateGimbalAxis(motor.index);
 
         const enableButton = article.querySelector('[data-enable]');
         enableButton.textContent = motor.requested ? '关闭' : '启用';
       }
+
+      updateGimbalControls();
+    }
+
+    function updateGimbalAxis(motor) {
+      const selected = state.motors[motor] || {};
+      const { minimum, maximum } = axisLimits(motor);
+      const angle = Number(selected.angle);
+      const target = Number(selected.target);
+      const currentPercent = axisPercent(angle, minimum, maximum);
+      const targetPercent = axisPercent(target, minimum, maximum);
+
+      const readout = document.querySelector(`[data-axis-readout="${motor}"]`);
+      const minimumLabel = document.querySelector(`[data-axis-min="${motor}"]`);
+      const maximumLabel = document.querySelector(`[data-axis-max="${motor}"]`);
+      const fill = document.querySelector(`[data-axis-fill="${motor}"]`);
+      const currentMarker = document.querySelector(`[data-axis-current="${motor}"]`);
+      const targetMarker = document.querySelector(`[data-axis-target="${motor}"]`);
+
+      if (readout) readout.textContent = `${format(angle, 2)} deg`;
+      if (minimumLabel) minimumLabel.textContent = `${format(minimum, 1)} deg`;
+      if (maximumLabel) maximumLabel.textContent = `${format(maximum, 1)} deg`;
+      if (fill) {
+        if (motor === 1) fill.style.height = `${targetPercent}%`;
+        else fill.style.width = `${targetPercent}%`;
+      }
+      if (currentMarker) setAxisMarker(currentMarker, motor, currentPercent);
+      if (targetMarker) setAxisMarker(targetMarker, motor, targetPercent);
+    }
+
+    function setAxisMarker(marker, motor, percent) {
+      const clamped = Math.min(100, Math.max(0, percent));
+      if (motor === 1) {
+        marker.style.left = '';
+        marker.style.bottom = `${clamped}%`;
+      } else {
+        marker.style.bottom = '';
+        marker.style.left = `${clamped}%`;
+      }
+    }
+
+    function axisPercent(value, minimum, maximum) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return 0;
+      if (minimum === maximum) return 0;
+      if (minimum < maximum) {
+        return ((Math.min(maximum, Math.max(minimum, number)) - minimum) / (maximum - minimum)) * 100;
+      }
+      const span = 360 - minimum + maximum;
+      const normalized = number >= minimum ? number - minimum : 360 - minimum + number;
+      return (Math.min(span, Math.max(0, normalized)) / span) * 100;
+    }
+
+    function updateGimbalControls() {
+      for (const button of els.gimbal.querySelectorAll('[data-jog-motor]')) {
+        button.disabled = !canControlMotor(Number(button.dataset.jogMotor));
+      }
+      const canHome = axes.some(axis => canControlMotor(axis.motor));
+      els.homeGimbal.disabled = !canHome;
+      els.padHome.disabled = !canHome;
     }
 
     function updateTargetControl(article, motor) {
@@ -735,12 +1153,14 @@
     }
 
     function setConnected(connected) {
+      if (!connected) stopJog();
       els.serialStatus.textContent = connected ? '已连接' : '未连接';
       els.serialStatus.className = `value ${connected ? 'ok' : 'warn'}`;
       els.connect.disabled = connected || !('serial' in navigator);
       els.disconnect.disabled = !connected;
       els.estop.disabled = !connected;
       els.baud.disabled = connected;
+      updateGimbalControls();
     }
 
     function logLine(kind, text) {

@@ -39,14 +39,34 @@ BLDCDriver3PWM driver1 = BLDCDriver3PWM(26, 27, 14, 12);
 #define COMMAND_BUFFER_SIZE 96
 #define ANGLE_LIMIT_MIN_DEG 0.0f
 #define ANGLE_LIMIT_MAX_DEG 360.0f
-#define ANGLE_MIN_DEFAULT_DEG 190.0f
-#define ANGLE_MAX_DEFAULT_DEG 360.0f
+
+struct AxisConfig
+{
+  const char *name;
+  float target_angle_deg;
+  float angle_min_deg;
+  float angle_max_deg;
+  float voltage_limit;
+  float velocity_limit;
+  float velocity_p;
+  float velocity_i;
+  float velocity_d;
+  float velocity_ramp;
+  float angle_p;
+  float angle_i;
+  float angle_d;
+  float angle_ramp;
+};
+
+const AxisConfig axis_configs[] = {
+    {"Yaw", 90.0f, 0.0f, 180.0f, 12.087f, 5.0f, 0.10f, 0.80f, 0.0f, 1000.0f, 3.0f, 0.0f, 0.0f, 0.0f},
+    {"Pitch", 135.0f, 85.0f, 165.0f, 12.070f, 60.0f, 0.25f, 1.50f, 0.0f, 1000.0f, 4.0f, 0.0f, 0.0f, 0.0f}};
 
 BLDCMotor *motors[] = {&motor, &motor1};
-float target_angle_deg[] = {0.0f, 0.0f};
+float target_angle_deg[] = {axis_configs[0].target_angle_deg, axis_configs[1].target_angle_deg};
 float target_velocity_rad_s[] = {0.0f, 0.0f};
-float angle_min_deg[] = {ANGLE_MIN_DEFAULT_DEG, ANGLE_MIN_DEFAULT_DEG};
-float angle_max_deg[] = {ANGLE_MAX_DEFAULT_DEG, ANGLE_MAX_DEFAULT_DEG};
+float angle_min_deg[] = {axis_configs[0].angle_min_deg, axis_configs[1].angle_min_deg};
+float angle_max_deg[] = {axis_configs[0].angle_max_deg, axis_configs[1].angle_max_deg};
 bool requested_enable[] = {true, true};
 
 uint32_t prev_board_check_millis = 0;
@@ -72,6 +92,7 @@ bool parse_bool(const char *token, bool *value);
 const char *mode_name(BLDCMotor *selected_motor);
 void print_pid(PIDController &pid);
 void print_motor_json(int index);
+void apply_axis_config(int index);
 float angle_rad_to_degrees_0_360(float angle_rad);
 float degrees_to_radians(float angle_deg);
 float clamp_float(float value, float minimum, float maximum);
@@ -110,26 +131,11 @@ void setup()
   motor.controller = MotionControlType::angle;
   motor1.controller = MotionControlType::angle;
 
-  motor.PID_velocity.P = 0.10f;
-  motor1.PID_velocity.P = 0.250f;
-  motor.PID_velocity.I = 0.80f;
-  motor1.PID_velocity.I = 0.75f;
-
-  motor.P_angle.P = 3.0f;
-  motor1.P_angle.P = 5.0f;
-
-  motor.voltage_limit = get_vin_Volt();
-  motor1.voltage_limit = get_vin_Volt();
-  motor.PID_velocity.limit = motor.voltage_limit;
-  motor1.PID_velocity.limit = motor1.voltage_limit;
-
   motor.LPF_velocity.Tf = 0.01f;
   motor1.LPF_velocity.Tf = 0.01f;
 
-  motor.velocity_limit = 5.0f;
-  motor1.velocity_limit = 100.0f;
-  motor.P_angle.limit = motor.velocity_limit;
-  motor1.P_angle.limit = motor1.velocity_limit;
+  apply_axis_config(0);
+  apply_axis_config(1);
 
   motor.init();
   motor1.init();
@@ -485,6 +491,9 @@ void print_motor_json(int index)
   BLDCMotor *selected_motor = motors[index];
   Serial.print(F("{\"index\":"));
   Serial.print(index);
+  Serial.print(F(",\"name\":\""));
+  Serial.print(axis_configs[index].name);
+  Serial.print(F("\""));
   Serial.print(F(",\"enabled\":"));
   Serial.print(selected_motor->enabled ? 1 : 0);
   Serial.print(F(",\"requested\":"));
@@ -529,6 +538,32 @@ void print_pid(PIDController &pid)
   Serial.print(F(",\"output_ramp\":"));
   Serial.print(pid.output_ramp, 4);
   Serial.print('}');
+}
+
+void apply_axis_config(int index)
+{
+  BLDCMotor *selected_motor = motors[index];
+  const AxisConfig &config = axis_configs[index];
+
+  target_velocity_rad_s[index] = 0.0f;
+  angle_min_deg[index] = clamp_angle_limit_degrees(config.angle_min_deg);
+  angle_max_deg[index] = clamp_angle_limit_degrees(config.angle_max_deg);
+  target_angle_deg[index] = clamp_angle_target_degrees(config.target_angle_deg, index);
+
+  selected_motor->voltage_limit = config.voltage_limit;
+  selected_motor->velocity_limit = config.velocity_limit;
+
+  selected_motor->PID_velocity.P = config.velocity_p;
+  selected_motor->PID_velocity.I = config.velocity_i;
+  selected_motor->PID_velocity.D = config.velocity_d;
+  selected_motor->PID_velocity.limit = config.voltage_limit;
+  selected_motor->PID_velocity.output_ramp = config.velocity_ramp;
+
+  selected_motor->P_angle.P = config.angle_p;
+  selected_motor->P_angle.I = config.angle_i;
+  selected_motor->P_angle.D = config.angle_d;
+  selected_motor->P_angle.limit = config.velocity_limit;
+  selected_motor->P_angle.output_ramp = config.angle_ramp;
 }
 
 void send_ack(const char *cmd)
