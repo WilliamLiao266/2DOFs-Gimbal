@@ -3,11 +3,13 @@
  *
  * Serial protocol, newline terminated:
  *   MODE,0,angle
- *   TARGET,1,12.5
+ *   TARGET,1,90
  *   PID,0,vel,P,0.015
  *   PID,1,angle,ramp,1000
  *   LIMIT,0,voltage,12
  *   LIMIT,1,velocity,20
+ *   LIMIT,0,angleMin,10
+ *   LIMIT,0,angleMax,170
  *   ENABLE,0,1
  *   ESTOP
  */
@@ -35,9 +37,16 @@ BLDCDriver3PWM driver1 = BLDCDriver3PWM(26, 27, 14, 12);
 #define TELEMETRY_PERIOD_MS 50
 #define BOARD_CHECK_PERIOD_MS 1000
 #define COMMAND_BUFFER_SIZE 96
+#define ANGLE_LIMIT_MIN_DEG 0.0f
+#define ANGLE_LIMIT_MAX_DEG 360.0f
+#define ANGLE_MIN_DEFAULT_DEG 190.0f
+#define ANGLE_MAX_DEFAULT_DEG 360.0f
 
 BLDCMotor *motors[] = {&motor, &motor1};
-float targets[] = {0.0f, 0.0f};
+float target_angle_deg[] = {0.0f, 0.0f};
+float target_velocity_rad_s[] = {0.0f, 0.0f};
+float angle_min_deg[] = {ANGLE_MIN_DEFAULT_DEG, ANGLE_MIN_DEFAULT_DEG};
+float angle_max_deg[] = {ANGLE_MAX_DEFAULT_DEG, ANGLE_MAX_DEFAULT_DEG};
 bool requested_enable[] = {true, true};
 
 uint32_t prev_board_check_millis = 0;
@@ -64,6 +73,14 @@ const char *mode_name(BLDCMotor *selected_motor);
 void print_pid(PIDController &pid);
 void print_motor_json(int index);
 float angle_rad_to_degrees_0_360(float angle_rad);
+float degrees_to_radians(float angle_deg);
+float clamp_float(float value, float minimum, float maximum);
+float clamp_angle_limit_degrees(float angle_deg);
+bool angle_within_limits(float angle_deg, int motor_index);
+float circular_distance_degrees(float left, float right);
+float clamp_angle_target_degrees(float angle_deg, int motor_index);
+float motion_target_for_motor(int motor_index);
+float telemetry_target_for_motor(int motor_index);
 
 void setup()
 {
@@ -93,13 +110,13 @@ void setup()
   motor.controller = MotionControlType::angle;
   motor1.controller = MotionControlType::angle;
 
-  motor.PID_velocity.P = 0.015f;
-  motor1.PID_velocity.P = 0.010f;
-  motor.PID_velocity.I = 0.12f;
-  motor1.PID_velocity.I = 0.12f;
+  motor.PID_velocity.P = 0.10f;
+  motor1.PID_velocity.P = 0.250f;
+  motor.PID_velocity.I = 0.80f;
+  motor1.PID_velocity.I = 0.75f;
 
-  motor.P_angle.P = 10.0f;
-  motor1.P_angle.P = 10.0f;
+  motor.P_angle.P = 3.0f;
+  motor1.P_angle.P = 5.0f;
 
   motor.voltage_limit = get_vin_Volt();
   motor1.voltage_limit = get_vin_Volt();
@@ -109,8 +126,8 @@ void setup()
   motor.LPF_velocity.Tf = 0.01f;
   motor1.LPF_velocity.Tf = 0.01f;
 
-  motor.velocity_limit = 20.0f;
-  motor1.velocity_limit = 20.0f;
+  motor.velocity_limit = 5.0f;
+  motor1.velocity_limit = 100.0f;
   motor.P_angle.limit = motor.velocity_limit;
   motor1.P_angle.limit = motor1.velocity_limit;
 
@@ -129,8 +146,8 @@ void loop()
   motor.loopFOC();
   motor1.loopFOC();
 
-  motor.move(targets[0]);
-  motor1.move(targets[1]);
+  motor.move(motion_target_for_motor(0));
+  motor1.move(motion_target_for_motor(1));
 
   board_check();
   handle_serial();
@@ -275,6 +292,7 @@ void handle_command(char *line)
     if (equals_ignore_case(mode, "angle") || equals_ignore_case(mode, "position"))
     {
       selected_motor->controller = MotionControlType::angle;
+      target_angle_deg[motor_index] = clamp_angle_target_degrees(target_angle_deg[motor_index], motor_index);
       send_ack(original);
     }
     else if (equals_ignore_case(mode, "velocity") || equals_ignore_case(mode, "speed"))
@@ -297,7 +315,21 @@ void handle_command(char *line)
       send_error(original, "invalid target");
       return;
     }
-    targets[motor_index] = value;
+
+    if (selected_motor->controller == MotionControlType::angle)
+    {
+      target_angle_deg[motor_index] = clamp_angle_target_degrees(value, motor_index);
+    }
+    else if (selected_motor->controller == MotionControlType::velocity)
+    {
+      target_velocity_rad_s[motor_index] = value;
+    }
+    else
+    {
+      send_error(original, "unsupported target mode");
+      return;
+    }
+
     send_ack(original);
     return;
   }
@@ -382,6 +414,16 @@ void handle_command(char *line)
       selected_motor->velocity_limit = value;
       selected_motor->P_angle.limit = value;
     }
+    else if (equals_ignore_case(limit_name, "angleMin") || equals_ignore_case(limit_name, "angle_min") || equals_ignore_case(limit_name, "minAngle") || equals_ignore_case(limit_name, "min_angle"))
+    {
+      angle_min_deg[motor_index] = clamp_angle_limit_degrees(value);
+      target_angle_deg[motor_index] = clamp_angle_target_degrees(target_angle_deg[motor_index], motor_index);
+    }
+    else if (equals_ignore_case(limit_name, "angleMax") || equals_ignore_case(limit_name, "angle_max") || equals_ignore_case(limit_name, "maxAngle") || equals_ignore_case(limit_name, "max_angle"))
+    {
+      angle_max_deg[motor_index] = clamp_angle_limit_degrees(value);
+      target_angle_deg[motor_index] = clamp_angle_target_degrees(target_angle_deg[motor_index], motor_index);
+    }
     else if (equals_ignore_case(limit_name, "ramp") || equals_ignore_case(limit_name, "output_ramp"))
     {
       selected_motor->PID_velocity.output_ramp = value;
@@ -450,7 +492,7 @@ void print_motor_json(int index)
   Serial.print(F(",\"mode\":\""));
   Serial.print(mode_name(selected_motor));
   Serial.print(F("\",\"target\":"));
-  Serial.print(targets[index], 4);
+  Serial.print(telemetry_target_for_motor(index), 4);
   Serial.print(F(",\"angle\":"));
   Serial.print(angle_rad_to_degrees_0_360(selected_motor->shaft_angle), 2);
   Serial.print(F(",\"rawAngleRad\":"));
@@ -467,6 +509,10 @@ void print_motor_json(int index)
   Serial.print(selected_motor->velocity_limit, 4);
   Serial.print(F(",\"ramp\":"));
   Serial.print(selected_motor->PID_velocity.output_ramp, 4);
+  Serial.print(F(",\"angleMin\":"));
+  Serial.print(angle_min_deg[index], 2);
+  Serial.print(F(",\"angleMax\":"));
+  Serial.print(angle_max_deg[index], 2);
   Serial.print(F("}}"));
 }
 
@@ -553,7 +599,7 @@ bool parse_float(const char *token, float *value)
 
   char *end = nullptr;
   float parsed = strtof(token, &end);
-  if (end == token || *end != '\0')
+  if (end == token || *end != '\0' || !isfinite(parsed))
   {
     return false;
   }
@@ -605,4 +651,96 @@ float angle_rad_to_degrees_0_360(float angle_rad)
     normalized += _2PI;
   }
   return normalized * 180.0f / _PI;
+}
+
+float degrees_to_radians(float angle_deg)
+{
+  return angle_deg * _PI / 180.0f;
+}
+
+float clamp_float(float value, float minimum, float maximum)
+{
+  if (value < minimum)
+  {
+    return minimum;
+  }
+
+  if (value > maximum)
+  {
+    return maximum;
+  }
+
+  return value;
+}
+
+float clamp_angle_limit_degrees(float angle_deg)
+{
+  return clamp_float(angle_deg, ANGLE_LIMIT_MIN_DEG, ANGLE_LIMIT_MAX_DEG);
+}
+
+bool angle_within_limits(float angle_deg, int motor_index)
+{
+  float minimum = angle_min_deg[motor_index];
+  float maximum = angle_max_deg[motor_index];
+
+  if (minimum <= maximum)
+  {
+    return angle_deg >= minimum && angle_deg <= maximum;
+  }
+
+  return angle_deg >= minimum || angle_deg <= maximum;
+}
+
+float circular_distance_degrees(float left, float right)
+{
+  float distance = fabsf(left - right);
+  while (distance > ANGLE_LIMIT_MAX_DEG)
+  {
+    distance -= ANGLE_LIMIT_MAX_DEG;
+  }
+
+  if (distance > 180.0f)
+  {
+    distance = ANGLE_LIMIT_MAX_DEG - distance;
+  }
+
+  return distance;
+}
+
+float clamp_angle_target_degrees(float angle_deg, int motor_index)
+{
+  float clamped = clamp_angle_limit_degrees(angle_deg);
+  if (angle_within_limits(clamped, motor_index))
+  {
+    return clamped;
+  }
+
+  float minimum = angle_min_deg[motor_index];
+  float maximum = angle_max_deg[motor_index];
+  if (minimum <= maximum)
+  {
+    return clamp_float(clamped, minimum, maximum);
+  }
+
+  return circular_distance_degrees(clamped, minimum) <= circular_distance_degrees(clamped, maximum) ? minimum : maximum;
+}
+
+float motion_target_for_motor(int motor_index)
+{
+  if (motors[motor_index]->controller == MotionControlType::angle)
+  {
+    return degrees_to_radians(clamp_angle_target_degrees(target_angle_deg[motor_index], motor_index));
+  }
+
+  return target_velocity_rad_s[motor_index];
+}
+
+float telemetry_target_for_motor(int motor_index)
+{
+  if (motors[motor_index]->controller == MotionControlType::angle)
+  {
+    return target_angle_deg[motor_index];
+  }
+
+  return target_velocity_rad_s[motor_index];
 }

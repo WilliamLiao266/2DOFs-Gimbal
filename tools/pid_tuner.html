@@ -231,7 +231,7 @@
 
     .control-grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr)) auto;
       gap: 10px;
       align-items: end;
     }
@@ -389,8 +389,8 @@
 
       <div class="control-grid">
         <label>
-          <span class="label">目标值</span>
-          <input type="number" step="0.001" data-target>
+          <span class="label" data-target-label>目标角 deg</span>
+          <input type="number" step="0.1" min="0" max="360" data-target>
         </label>
         <label>
           <span class="label">电压限制 V</span>
@@ -399,6 +399,14 @@
         <label>
           <span class="label">速度限制 rad/s</span>
           <input type="number" step="0.01" data-limit="velocity">
+        </label>
+        <label>
+          <span class="label">最小角 deg</span>
+          <input type="number" step="0.1" min="0" max="360" data-angle-limit="angleMin">
+        </label>
+        <label>
+          <span class="label">最大角 deg</span>
+          <input type="number" step="0.1" min="0" max="360" data-angle-limit="angleMax">
         </label>
         <button data-enable>启用</button>
       </div>
@@ -485,6 +493,8 @@
       const motor = Number(article.dataset.motor);
 
       if (event.target.matches('[data-mode]')) {
+        state.motors[motor] = { ...state.motors[motor], mode: event.target.dataset.mode };
+        updateTargetControl(article, state.motors[motor]);
         sendCommand(`MODE,${motor},${event.target.dataset.mode}`);
       }
 
@@ -503,9 +513,16 @@
       if (value === '') return;
 
       if (event.target.matches('[data-target]')) {
-        sendCommand(`TARGET,${motor},${value}`);
+        const mode = state.motors[motor]?.mode ?? 'angle';
+        const target = mode === 'angle' ? clampAngleInput(value) : value;
+        event.target.value = target;
+        sendCommand(`TARGET,${motor},${target}`);
       } else if (event.target.matches('[data-limit]')) {
         sendCommand(`LIMIT,${motor},${event.target.dataset.limit},${value}`);
+      } else if (event.target.matches('[data-angle-limit]')) {
+        const limit = clampAngleInput(value);
+        event.target.value = limit;
+        sendCommand(`LIMIT,${motor},${event.target.dataset.angleLimit},${limit}`);
       } else if (event.target.matches('[data-pid-loop]')) {
         sendCommand(`PID,${motor},${event.target.dataset.pidLoop},${event.target.dataset.pidParam},${value}`);
       }
@@ -655,9 +672,12 @@
           button.classList.toggle('active', button.dataset.mode === motor.mode);
         });
 
-        setInput(article.querySelector('[data-target]'), motor.target, 4);
+        updateTargetControl(article, motor);
+        setInput(article.querySelector('[data-target]'), motor.target, motor.mode === 'angle' ? 2 : 4);
         setInput(article.querySelector('[data-limit="voltage"]'), motor.limits?.voltage, 4);
         setInput(article.querySelector('[data-limit="velocity"]'), motor.limits?.velocity, 4);
+        setInput(article.querySelector('[data-angle-limit="angleMin"]'), motor.limits?.angleMin, 2);
+        setInput(article.querySelector('[data-angle-limit="angleMax"]'), motor.limits?.angleMax, 2);
 
         setPidInputs(article, 'vel', motor.velocityPID);
         setPidInputs(article, 'angle', motor.anglePID);
@@ -665,6 +685,30 @@
         const enableButton = article.querySelector('[data-enable]');
         enableButton.textContent = motor.requested ? '关闭' : '启用';
       }
+    }
+
+    function updateTargetControl(article, motor) {
+      const isAngleMode = (motor?.mode ?? 'angle') === 'angle';
+      const label = article.querySelector('[data-target-label]');
+      const input = article.querySelector('[data-target]');
+      if (!label || !input) return;
+
+      label.textContent = isAngleMode ? '目标角 deg' : '目标速度 rad/s';
+      input.step = isAngleMode ? '0.1' : '0.001';
+      if (isAngleMode) {
+        input.min = '0';
+        input.max = '360';
+      } else {
+        input.removeAttribute('min');
+        input.removeAttribute('max');
+      }
+    }
+
+    function clampAngleInput(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return '0';
+      const clamped = Math.min(360, Math.max(0, number));
+      return clamped.toFixed(2).replace(/\.?0+$/, '');
     }
 
     function setPidInputs(article, loop, pid) {
